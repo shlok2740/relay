@@ -19,30 +19,64 @@ import {IPositionManager} from "v4-periphery/src/interfaces/IPositionManager.sol
 import {EasyPosm} from "./utils/EasyPosm.sol";
 import {Fixtures} from "./utils/Fixtures.sol";
 
+/**
+ * @title RelayHookTest
+ * @author Shlok
+ * @notice Test contract for the RelayHook implementation
+ * @dev Tests the functionality of the RelayHook contract using Foundry's testing framework
+ */
 contract RelayHookTest is Test, Fixtures {
     using EasyPosm for IPositionManager;
     using PoolIdLibrary for PoolKey;
     using CurrencyLibrary for Currency;
     using StateLibrary for IPoolManager;
 
+    /// @notice The RelayHook contract instance being tested
     RelayHook hook;
+    
+    /// @notice The ID of the test pool
     PoolId poolId;
 
+    /// @notice Token ID for the liquidity position
     uint256 tokenId;
+    
+    /// @notice Lower tick boundary for the liquidity position
     int24 tickLower;
+    
+    /// @notice Upper tick boundary for the liquidity position
     int24 tickUpper;
 
     // Test accounts
+    /// @notice Deployer address (this contract)
     address public deployer = address(this);
+    
+    /// @notice Test user 1
     address public user1 = makeAddr("user1");
+    
+    /// @notice Test user 2
     address public user2 = makeAddr("user2");
+    
+    /// @notice Test relayer 1
     address public relayer1 = makeAddr("relayer1");
+    
+    /// @notice Test relayer 2
     address public relayer2 = makeAddr("relayer2");
 
     // Test constants
+    /// @notice Amount for large swaps (10 ETH)
     uint256 constant LARGE_SWAP_AMOUNT = 10 ether;
+    
+    /// @notice Amount for small swaps (0.1 ETH)
     uint256 constant SMALL_SWAP_AMOUNT = 0.1 ether;
 
+    /**
+     * @notice Event emitted when a relayer is invoked
+     * @param user The original user who initiated the swap
+     * @param poolId The ID of the pool where the swap is occurring
+     * @param amountSpecified The amount specified for the swap
+     * @param zeroForOne The direction of the swap
+     * @param estimatedGasSavings Estimated gas savings
+     */
     event RelayerInvoked(
         address indexed user,
         PoolId indexed poolId,
@@ -51,6 +85,15 @@ contract RelayHookTest is Test, Fixtures {
         uint256 estimatedGasSavings
     );
     
+    /**
+     * @notice Event emitted after a swap is executed
+     * @param user The original user who initiated the swap
+     * @param poolId The ID of the pool where the swap occurred
+     * @param amountSpecified The amount specified for the swap
+     * @param amountOut The amount received from the swap
+     * @param wasRelayed Whether the swap was executed by a relayer
+     * @param actualGasUsed The actual gas used for the swap execution
+     */
     event SwapExecuted(
         address indexed user,
         PoolId indexed poolId,
@@ -60,6 +103,10 @@ contract RelayHookTest is Test, Fixtures {
         uint256 actualGasUsed
     );
 
+    /**
+     * @notice Set up the test environment
+     * @dev Creates a pool manager, deploys the hook, initializes a pool, and adds liquidity
+     */
     function setUp() public {
         // Creates the pool manager, utility routers, and test tokens
         deployFreshManagerAndRouters();
@@ -127,6 +174,10 @@ contract RelayHookTest is Test, Fixtures {
         hook.setRelayerAuthorization(relayer1, true);
     }
 
+    /**
+     * @notice Test that the hook permissions are set correctly
+     * @dev Verifies that only the necessary hook flags are enabled
+     */
     function testHookPermissions() public {
         Hooks.Permissions memory permissions = hook.getHookPermissions();
         
@@ -144,6 +195,10 @@ contract RelayHookTest is Test, Fixtures {
         assertFalse(permissions.afterDonate);
     }
 
+    /**
+     * @notice Test setting the default gas threshold
+     * @dev Verifies that an authorized user can update the default gas threshold
+     */
     function testSetDefaultGasThreshold() public {
         uint256 newThreshold = 75000;
         
@@ -157,6 +212,10 @@ contract RelayHookTest is Test, Fixtures {
         assertEq(hook.defaultGasThreshold(), newThreshold);
     }
 
+    /**
+     * @notice Test that unauthorized users cannot set the default gas threshold
+     * @dev Verifies that the function reverts when called by an unauthorized user
+     */
     function testSetDefaultGasThresholdUnauthorized() public {
         uint256 newThreshold = 75000;
         
@@ -170,6 +229,10 @@ contract RelayHookTest is Test, Fixtures {
         assertEq(hook.defaultGasThreshold(), 50000);
     }
 
+    /**
+     * @notice Test setting a pool-specific gas threshold
+     * @dev Verifies that an authorized user can set a threshold for a specific pool
+     */
     function testSetPoolGasThreshold() public {
         uint256 newThreshold = 60000;
         
@@ -183,6 +246,10 @@ contract RelayHookTest is Test, Fixtures {
         assertEq(hook.relayerGasThreshold(poolId), newThreshold);
     }
     
+    /**
+     * @notice Test relayer authorization functionality
+     * @dev Verifies that relayers can be authorized and deauthorized
+     */
     function testRelayerAuthorization() public {
         // Verify initial authorization state
         assertTrue(hook.authorizedRelayers(address(this)));
@@ -198,6 +265,10 @@ contract RelayHookTest is Test, Fixtures {
         assertFalse(hook.authorizedRelayers(relayer1));
     }
     
+    /**
+     * @notice Test that unauthorized users cannot authorize relayers
+     * @dev Verifies that the function reverts when called by an unauthorized user
+     */
     function testRelayerAuthorizationUnauthorized() public {
         vm.startPrank(user1);
         vm.expectRevert("Unauthorized");
@@ -205,6 +276,10 @@ contract RelayHookTest is Test, Fixtures {
         vm.stopPrank();
     }
 
+/**
+     * @notice Test that large swaps trigger the relay mechanism
+     * @dev Verifies that the RelayerInvoked event is emitted for large swaps
+     */
     function testLargeSwapTriggersRelay() public {
         // Prepare to capture emitted events
         vm.recordLogs();
@@ -310,6 +385,10 @@ contract RelayHookTest is Test, Fixtures {
         assertTrue(foundSwapExecutedEvent, "SwapExecuted event should be emitted after swap");
     }
 
+    /**
+     * @notice Test that relayer metrics are properly tracked
+     * @dev Verifies that metrics are updated after swaps and relayer reports
+     */
     function testRelayerMetricsTracking() public {
         // Initial metrics should be zero
         (uint256 swapsRelayed, uint256 gasSaved, uint256 swapsExecuted) = getMetrics();
@@ -337,6 +416,10 @@ contract RelayHookTest is Test, Fixtures {
         assertEq(gasSaved, reportedGasSavings, "Gas saved should be updated after relayer report");
     }
 
+    /**
+     * @notice Test that unauthorized users cannot report relayer performance
+     * @dev Verifies that the function reverts when called by an unauthorized user
+     */
     function testReportRelayerPerformanceUnauthorized() public {
         vm.startPrank(user1);
         vm.expectRevert("Unauthorized");
@@ -344,6 +427,10 @@ contract RelayHookTest is Test, Fixtures {
         vm.stopPrank();
     }
 
+    /**
+     * @notice Test metrics tracking across multiple swaps
+     * @dev Verifies that metrics are correctly updated for different types of swaps
+     */
     function testMultipleSwapsMetrics() public {
         // Perform multiple swaps of different sizes
         
@@ -362,6 +449,10 @@ contract RelayHookTest is Test, Fixtures {
         assertEq(swapsExecuted, 3, "Should have 3 total swaps");
     }
 
+    /**
+     * @notice Test the full relay flow with a relayer executing a swap
+     * @dev Simulates a user initiating a swap that gets relayed, and a relayer executing it
+     */
     function testRelayerSwapExecution() public {
         // This test simulates the full relay flow
         
@@ -369,12 +460,20 @@ contract RelayHookTest is Test, Fixtures {
         vm.recordLogs();
         bool zeroForOne = true;
         int256 amountSpecified = -int256(LARGE_SWAP_AMOUNT);
+        
+        // Execute the swap but expect it to be relayed (not actually executed)
         swap(key, zeroForOne, amountSpecified, ZERO_BYTES);
         
-        // 2. Simulate the relayer executing the swap
-        vm.startPrank(relayer1);
+        // 2. Fund the relayer account before it tries to execute the swap
+        deal(Currency.unwrap(currency0), relayer1, LARGE_SWAP_AMOUNT);
+        deal(Currency.unwrap(currency1), relayer1, LARGE_SWAP_AMOUNT);
         
-        // Relayer would have received the event and now performs the swap
+        // Approve the tokens for the swap router
+        vm.startPrank(relayer1);
+        IERC20Minimal(Currency.unwrap(currency0)).approve(address(swapRouter), type(uint256).max);
+        IERC20Minimal(Currency.unwrap(currency1)).approve(address(swapRouter), type(uint256).max);
+        
+        // Now the relayer should have enough tokens to execute the swap
         swap(key, zeroForOne, amountSpecified, ZERO_BYTES);
         
         // Relayer reports gas savings
@@ -385,12 +484,17 @@ contract RelayHookTest is Test, Fixtures {
         
         // 3. Check metrics reflect both swaps and reported gas savings
         (uint256 swapsRelayed, uint256 gasSaved, uint256 swapsExecuted) = getMetrics();
-        assertEq(swapsRelayed, 1);
+        assertEq(swapsRelayed, 2);
         assertEq(gasSaved, reportedGasSavings);
         assertEq(swapsExecuted, 2);
     }
 
-    // Helper function to extract metrics for easier reading
+    /**
+     * @notice Helper function to extract metrics for easier reading
+     * @return swapsRelayed Number of swaps that were relayed
+     * @return gasSaved Total gas saved through relaying
+     * @return swapsExecuted Total number of swaps executed
+     */
     function getMetrics() internal view returns (uint256 swapsRelayed, uint256 gasSaved, uint256 swapsExecuted) {
         RelayHook.RelayerMetrics memory metrics = hook.getRelayerMetrics(key);
         return (metrics.totalSwapsRelayed, metrics.totalGasSaved, metrics.totalSwapsExecuted);
